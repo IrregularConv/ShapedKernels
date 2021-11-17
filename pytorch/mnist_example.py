@@ -8,7 +8,6 @@ from torchvision.datasets import MNIST
 import torch.optim as optim
 
 import tqdm
-from typing import Optional, Union
 import time
 import matplotlib.pyplot as plt
 import numpy as np
@@ -40,7 +39,7 @@ class BrainDamage(torch.autograd.Function):
         x, w, mask = ctx.saved_variables
         x_grad = w_grad = None
         if ctx.needs_input_grad[0]:
-            x_grad = torch.nn.grad.conv2d_input(x.shape, w, grad_output)
+            x_grad = torch.nn.grad.conv2d_input(x.shape, w, grad_output) # TODO: include padding and stride
         if ctx.needs_input_grad[1]:
             w_grad = torch.nn.grad.conv2d_weight(x, w.shape, grad_output)
             w_grad *= mask
@@ -64,7 +63,7 @@ class IrreguConv(nn.Conv2d):
         # Set up weights given in nn.Conv2d
         weights = torch.zeros((out_channels, in_channels, kernel_size, kernel_size), requires_grad = True)
         nn.init.kaiming_normal(weights)
-        self.weight = torch.nn.Parameter(weights*mask)
+        self.weight = torch.nn.Parameter(weights*self.mask)
 
     def forward(self, input: Tensor) -> Tensor:
         output = BrainDamage.apply(input, self.weight, self.mask, self.stride, self.padding)
@@ -97,15 +96,18 @@ class IrreguConvCustomWeights(nn.Conv2d):
         
         return output
 
-
 class IrreguNet(nn.Module):
-    def __init__(self, kernel_mask):
+    def __init__(self):
         super(IrreguNet, self).__init__()
-        self.conv1 = IrreguConv(1, 8, 5, mask = kernel_mask)
+        self.conv1 = IrreguConv(1, 8, 5, mask = None)
         self.conv2 = nn.Conv2d(8, 16, 5)
         self.dropout = nn.Dropout2d()
         self.fc1 = nn.Linear(16 * 8 * 8, 100)
         self.fc2 = nn.Linear(100, 10)
+
+    @staticmethod
+    def add_mask(kernel_mask):
+        IrreguNet.conv1 = IrreguConv(1, 8, 5, mask = kernel_mask)
     
     def forward(self, x):
         x = F.relu(F.max_pool2d(self.conv1(x), 2))
@@ -248,25 +250,37 @@ def run_training(epochs, net, net_num = 1):
         test_error, test_accuracy = test(epoch, test_loader, net)
         test_l += [[test_error, test_accuracy]]
 
-    return train_l, test_l
+    return net, test_l
 
-search_epochs = 3
-random_tryouts = 10
+if __name__ == "__main__":
+    # normal_model = ReguNet()
+    # net_norm, test_loss = run_training(20, normal_model)
 
-all_nets = []
+    # torch.save(normal_model.state_dict(), "normal_model_state_dict")
 
-for i in range(random_tryouts):
-    random_mask = (torch.rand(size=(num_filters, input_filter_size, kernel_size, kernel_size)) < 0.5).int()
-    model_search = IrreguNet(random_mask)
-    _, test_error = run_training(search_epochs, model_search, net_num = i)
-    all_nets += [[model_search, test_error[-1][0]]]
+    search_epochs = 3
+    random_tryouts = 15
 
-min_error = np.argmin([row[1] for row in all_nets]) # use argmin here
+    all_nets = []
 
-chosen_net = all_nets[min_error][0]
+    for i in range(random_tryouts):
+        random_mask = (torch.rand(size=(num_filters, input_filter_size, kernel_size, kernel_size)) < 0.5).int()
+        model_search = IrreguNet()
+        IrreguNet.add_mask(kernel_mask=random_mask)
+        model_ret, test_error = run_training(search_epochs, model_search, net_num = i)
+        all_nets += [[model_ret, test_error[-1][0]]]
 
-train_loss, test_loss = run_training(15, chosen_net)
+    min_error = np.argmin([row[1] for row in all_nets]) # use argmin here
 
+    chosen_net = all_nets[min_error][0]
+
+    net_to_rule_them_all, test_loss = run_training(20, chosen_net)
+    torch.save(net_to_rule_them_all.state_dict(), "chosen_net_state_dict")
+    torch.save(net_to_rule_them_all, "chosen_net")
+
+
+# ----------------------------------------------
+# Some other implementations to compare nets
 if False:
 
     irregu_model = IrreguNet((torch.rand(size=(num_filters, input_filter_size, kernel_size, kernel_size)) < 0.5).int())
