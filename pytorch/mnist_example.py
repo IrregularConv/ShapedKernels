@@ -88,7 +88,7 @@ class IrreguConvCustomWeights(nn.Conv2d):
         # Set up weights manually and set nn.Conv2d param to None to save memory
         weights = torch.zeros((out_channels, in_channels, kernel_size, kernel_size), requires_grad = True)
         nn.init.kaiming_normal(weights)
-        self.weights = torch.nn.Parameter(weights*mask)
+        self.weights = torch.nn.Parameter(weights*self.mask)
         self.weight = None
 
     def forward(self, input: Tensor) -> Tensor:
@@ -168,6 +168,9 @@ def train(epoch, train_data, model, optimizer, net_num = 1):
     correct_predictions = 0
     
     criterion = F.cross_entropy
+
+        
+
     for i, (input, target) in enumerate(train_data):
         if torch.cuda.is_available() and use_GPU:
             input = input.float().cuda()
@@ -263,20 +266,47 @@ if __name__ == "__main__":
 
     all_nets = []
 
-    for i in range(random_tryouts):
-        random_mask = (torch.rand(size=(num_filters, input_filter_size, kernel_size, kernel_size)) < 0.5).int()
-        model_search = IrreguNet()
-        IrreguNet.add_mask(kernel_mask=random_mask)
-        model_ret, test_error = run_training(search_epochs, model_search, net_num = i)
-        all_nets += [[model_ret, test_error[-1][0]]]
+    irregular_net = IrreguNet()
 
-    min_error = np.argmin([row[1] for row in all_nets]) # use argmin here
+    kernel_5_5 = input_filter_size * [[[1,0,1,0,1],[0,1,0,1,0],[1,0,1,0,1],[0,1,0,1,0],[1,0,1,0,1]]]
+    mask = torch.tensor(num_filters*[kernel_5_5])
+    irregular_net.add_mask(mask)
 
-    chosen_net = all_nets[min_error][0]
+    irregu_model_ret, irregu_test_error = run_training(20, irregular_net)
 
-    net_to_rule_them_all, test_loss = run_training(20, chosen_net)
-    torch.save(net_to_rule_them_all.state_dict(), "chosen_net_state_dict")
-    torch.save(net_to_rule_them_all, "chosen_net")
+    regu_net = ReguNet()
+    regu_model_ret, regu_test_error = run_training(20, regu_net)
+
+    fig, axs = plt.subplots(1, 2, figsize = (10, 10))
+    axs[0].plot([row[0] for row in irregu_test_error], label = 'irregular error')
+    axs[0].plot([row[0] for row in regu_test_error], label = 'regular error')
+
+    axs[1].plot([row[1] for row in irregu_test_error], label = 'irregular accuracy')
+    axs[1].plot([row[1] for row in regu_test_error], label = 'regular accuracy')
+    axs[1].set(ylim=(0.4, 1))
+
+    axs[0].set_title('Errors')
+    axs[0].legend()
+    axs[1].set_title('Accuracies')
+    axs[1].legend()
+
+    plt.show()
+
+
+    # for i in range(random_tryouts):
+    #     random_mask = (torch.rand(size=(num_filters, input_filter_size, kernel_size, kernel_size)) < 0.5).int()
+    #     model_search = IrreguNet()
+    #     IrreguNet.add_mask(kernel_mask=random_mask)
+    #     model_ret, test_error = run_training(search_epochs, model_search, net_num = i)
+    #     all_nets += [[model_ret, test_error[-1][0]]]
+
+    # min_error = np.argmin([row[1] for row in all_nets]) # use argmin here
+
+    # chosen_net = all_nets[min_error][0]
+
+    # net_to_rule_them_all, test_loss = run_training(20, chosen_net)
+    # torch.save(net_to_rule_them_all.state_dict(), "chosen_net_state_dict")
+    # torch.save(net_to_rule_them_all, "chosen_net")
 
 
 # ----------------------------------------------
